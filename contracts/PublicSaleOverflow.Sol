@@ -130,7 +130,6 @@ contract PublicSaleOverflow is Ownable, ReentrancyGuard {
                 (commitments[msg.sender] * ethersToRaise) / totalCommitments //// @audit-info multiplication before division - no issue
             );
             uint256 ethersToRefund = commitments[msg.sender] - ethersToSpend;
-	// ethersToRefund = (ethersToRefund / 10) * 10; //@audit either add this round down or handle hardcoded withdraw value in finish() in case of precision loss happening here
             uint256 tokensToReceive = (tokensToSell * ethersToSpend) /
                 ethersToRaise;
 
@@ -165,35 +164,18 @@ contract PublicSaleOverflow is Ownable, ReentrancyGuard {
 
         finished = true;
 
-	if (totalCommitments >= refundThreshold) {
-            if (ethersToRaise >= totalCommitments) {
-                //underflow
+        if (totalCommitments >= refundThreshold) {
+            (bool success, ) = payable(owner()).call{
+                value: Math.min(ethersToRaise, totalCommitments)
+            }("");
+            require(success, "Failed to transfer ether");
+            if (ethersToRaise > totalCommitments) {
                 uint256 tokensToBurn = (tokensToSell *
                     (ethersToRaise - totalCommitments)) / ethersToRaise;
                 salesToken.safeTransfer(burnAddress, tokensToBurn);
-                (bool success, ) = owner().call{value: totalCommitments}(""); //@audit assumption: there is no risk of precision loss for underflow condition and we can use hardcoded values in call
-                if (!success) revert EthTransferFailed();
-                return (totalCommitments, tokensToBurn);
-            } else {
-                //overflow
-                if (address(this).balance > ethersToRaise) {
-                    //@audit-info if no precision loss in overflowRefund(), we can hardcode ethersToRaise in call
-                    (bool success2, ) = owner().call{value: ethersToRaise}("");
-                    if (!success2) revert EthTransferFailed();
-                    return (ethersToRaise, 0);
-                } else {
-                    //@audit-info if there is  precision loss, withdraw all balance
-                    (bool success3, ) = owner().call{
-                        value: address(this).balance
-                    }("");
-                    if (!success3) revert EthTransferFailed();
-                    return (address(this).balance, 0);
-                }
             }
         } else {
-            // if refundThreshold not reached, owner gets no eth. Tokens are sent back.
             salesToken.safeTransfer(owner(), tokensToSell);
-            return (0, tokensToSell);
         }
     }
 
