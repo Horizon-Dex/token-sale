@@ -10,7 +10,7 @@ import "@openzeppelin/contracts/utils/math/Math.sol";
 import "@openzeppelin/contracts/utils/cryptography/MerkleProof.sol";
 
 
-contract PrivateSaleOverflowAudited is Ownable, ReentrancyGuard {
+contract PrivateSaleOverflow is Ownable, ReentrancyGuard {
     using SafeERC20 for IERC20;
 
     error NotAllowed();
