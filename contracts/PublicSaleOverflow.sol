@@ -86,7 +86,7 @@ contract PublicSaleOverflow is Ownable, ReentrancyGuard {
         if (
             !started ||
             block.timestamp <= startTime ||
-            block.timestamp > claimStartTime
+            block.timestamp >= claimStartTime
         ) revert NotStartedOrAlreadyEnded();
 
         if (
@@ -126,7 +126,8 @@ contract PublicSaleOverflow is Ownable, ReentrancyGuard {
     }
 
     function claim() external nonReentrant returns (uint256, uint256) {
-        if (block.timestamp < claimStartTime) revert NotStartedOrAlreadyEnded();
+        if (block.timestamp <= claimStartTime)
+            revert NotStartedOrAlreadyEnded();
 
         if (commitments[msg.sender] == 0) revert InsufficientCommitment();
 
@@ -159,7 +160,7 @@ contract PublicSaleOverflow is Ownable, ReentrancyGuard {
     }
 
     function finish() external onlyOwner returns (uint, uint) {
-        if (block.timestamp < claimStartTime) revert NotFinished();
+        if (block.timestamp <= claimStartTime) revert NotFinished();
 
         if (finished) revert AlreadyFinished();
 

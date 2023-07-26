@@ -9,7 +9,6 @@ import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/utils/math/Math.sol";
 import "@openzeppelin/contracts/utils/cryptography/MerkleProof.sol";
 
-
 contract PrivateSaleOverflow is Ownable, ReentrancyGuard {
     using SafeERC20 for IERC20;
 
@@ -109,7 +108,7 @@ contract PrivateSaleOverflow is Ownable, ReentrancyGuard {
         if (
             !started ||
             block.timestamp <= startTime ||
-            block.timestamp > refundStartTime
+            block.timestamp >= refundStartTime
         ) revert NotStartedOrAlreadyEnded();
 
         if (
@@ -177,7 +176,7 @@ contract PrivateSaleOverflow is Ownable, ReentrancyGuard {
     }
 
     function overflowRefund() external nonReentrant returns (uint256) {
-        if (block.timestamp < refundStartTime)
+        if (block.timestamp <= refundStartTime)
             revert NotStartedOrAlreadyEnded();
         if (userRefunded[msg.sender] == true) revert HasRefunded();
         if (commitments[msg.sender] == 0) revert InsufficientCommitment();
@@ -197,7 +196,7 @@ contract PrivateSaleOverflow is Ownable, ReentrancyGuard {
     }
 
     function finish() external onlyOwner returns (uint256, uint256) {
-        if (block.timestamp < refundStartTime) revert NotFinished();
+        if (block.timestamp <= refundStartTime) revert NotFinished();
 
         if (finished) revert AlreadyFinished();
 
