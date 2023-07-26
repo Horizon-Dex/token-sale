@@ -9,7 +9,6 @@ import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/utils/math/Math.sol";
 import "@openzeppelin/contracts/utils/cryptography/MerkleProof.sol";
 
-
 contract PrivateSaleOverflow is Ownable, ReentrancyGuard {
     using SafeERC20 for IERC20;
 
@@ -39,7 +38,7 @@ contract PrivateSaleOverflow is Ownable, ReentrancyGuard {
     address public immutable burnAddress;
 
     uint256 public constant MIN_COMMITMENT = 0.02 ether;
-    uint256 public constant MAX_COMMITMENT = 10 ether;
+    uint256 public constant MAX_COMMITMENT = 100 ether;
 
     bool public started;
     bool public finished;
@@ -53,6 +52,7 @@ contract PrivateSaleOverflow is Ownable, ReentrancyGuard {
     event ClaimTokens(address indexed buyer, uint256 token);
     event ClaimETH(address indexed buyer, uint256 token);
 
+    //test
     constructor(
         IERC20 _salesToken,
         uint256 _tokensToSell,
@@ -109,7 +109,7 @@ contract PrivateSaleOverflow is Ownable, ReentrancyGuard {
         if (
             !started ||
             block.timestamp <= startTime ||
-            block.timestamp > refundStartTime
+            block.timestamp >= refundStartTime
         ) revert NotStartedOrAlreadyEnded();
 
         if (
@@ -133,7 +133,7 @@ contract PrivateSaleOverflow is Ownable, ReentrancyGuard {
                 (commitments[account] * ethersToRaise) / totalCommitments
             );
             uint256 ethersToRefund = commitments[account] - ethersToSpend;
-            ethersToRefund = (ethersToRefund / 10) * 10;
+            ethersToRefund = (ethersToRefund / 10) * 10; // round down fixing overflow
             uint256 tokensToReceive = (tokensToSell * ethersToSpend) /
                 ethersToRaise;
             return (ethersToRefund, tokensToReceive);
@@ -177,7 +177,7 @@ contract PrivateSaleOverflow is Ownable, ReentrancyGuard {
     }
 
     function overflowRefund() external nonReentrant returns (uint256) {
-        if (block.timestamp < refundStartTime)
+        if (block.timestamp <= refundStartTime)
             revert NotStartedOrAlreadyEnded();
         if (userRefunded[msg.sender] == true) revert HasRefunded();
         if (commitments[msg.sender] == 0) revert InsufficientCommitment();
@@ -197,7 +197,7 @@ contract PrivateSaleOverflow is Ownable, ReentrancyGuard {
     }
 
     function finish() external onlyOwner returns (uint256, uint256) {
-        if (block.timestamp < refundStartTime) revert NotFinished();
+        if (block.timestamp <= refundStartTime) revert NotFinished();
 
         if (finished) revert AlreadyFinished();
 

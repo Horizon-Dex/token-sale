@@ -45,6 +45,7 @@ contract PublicSaleOverflow is Ownable, ReentrancyGuard {
     event ClaimTokens(address indexed buyer, uint256 token);
     event ClaimETH(address indexed buyer, uint256 token);
 
+    //test
     constructor(
         IERC20 _salesToken,
         uint256 _tokensToSell,
@@ -86,7 +87,7 @@ contract PublicSaleOverflow is Ownable, ReentrancyGuard {
         if (
             !started ||
             block.timestamp <= startTime ||
-            block.timestamp > claimStartTime
+            block.timestamp >= claimStartTime
         ) revert NotStartedOrAlreadyEnded();
 
         if (
@@ -109,7 +110,7 @@ contract PublicSaleOverflow is Ownable, ReentrancyGuard {
                 (commitments[account] * ethersToRaise) / totalCommitments
             );
             uint256 ethersToRefund = commitments[account] - ethersToSpend;
-            ethersToRefund = (ethersToRefund / 10) * 10;
+            ethersToRefund = (ethersToRefund / 10) * 10; // round down fixing overflow
             uint256 tokensToReceive = (tokensToSell * ethersToSpend) /
                 ethersToRaise;
             return (ethersToRefund, tokensToReceive);
@@ -126,7 +127,8 @@ contract PublicSaleOverflow is Ownable, ReentrancyGuard {
     }
 
     function claim() external nonReentrant returns (uint256, uint256) {
-        if (block.timestamp < claimStartTime) revert NotStartedOrAlreadyEnded();
+        if (block.timestamp <= claimStartTime)
+            revert NotStartedOrAlreadyEnded();
 
         if (commitments[msg.sender] == 0) revert InsufficientCommitment();
 
@@ -159,7 +161,7 @@ contract PublicSaleOverflow is Ownable, ReentrancyGuard {
     }
 
     function finish() external onlyOwner returns (uint, uint) {
-        if (block.timestamp < claimStartTime) revert NotFinished();
+        if (block.timestamp <= claimStartTime) revert NotFinished();
 
         if (finished) revert AlreadyFinished();
 
