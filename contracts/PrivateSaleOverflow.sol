@@ -7,8 +7,9 @@ import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/utils/math/Math.sol";
+import "@openzeppelin/contracts/utils/cryptography/MerkleProof.sol";
 
-contract PublicSaleOverflow is Ownable, ReentrancyGuard {
+contract PrivateSaleOverflow is Ownable, ReentrancyGuard {
     using SafeERC20 for IERC20;
 
     error NotAllowed();
@@ -20,19 +21,24 @@ contract PublicSaleOverflow is Ownable, ReentrancyGuard {
     error InsufficientCommitment();
     error MaxReached();
     error HasClaimed();
+    error HasRefunded();
     error InvalidParam();
     error EthTransferFailed();
+    error NotOverflow();
 
     IERC20 public immutable salesToken;
     uint256 public immutable tokensToSell;
     uint256 public immutable ethersToRaise;
     uint256 public immutable refundThreshold;
+    bytes32 private immutable _merkleRootAllowlist;
     uint256 public startTime;
     uint256 public claimStartTime;
+    uint256 public refundStartTime;
+
     address public immutable burnAddress;
 
     uint256 public constant MIN_COMMITMENT = 0.02 ether;
-    uint256 public constant MAX_COMMITMENT = 1000 ether;
+    uint256 public constant MAX_COMMITMENT = 100 ether;
 
     bool public started;
     bool public finished;
@@ -40,6 +46,7 @@ contract PublicSaleOverflow is Ownable, ReentrancyGuard {
     uint256 public totalCommitments;
     mapping(address => uint256) public commitments;
     mapping(address => bool) public userClaimed;
+    mapping(address => bool) public userRefunded;
 
     event Commit(address indexed buyer, uint256 amount);
     event ClaimTokens(address indexed buyer, uint256 token);
@@ -51,7 +58,8 @@ contract PublicSaleOverflow is Ownable, ReentrancyGuard {
         uint256 _tokensToSell,
         uint256 _ethersToRaise,
         uint256 _refundThreshold,
-        address _burnAddress
+        address _burnAddress,
+        bytes32 _root
     ) {
         if (_ethersToRaise == 0) revert InvalidParam();
         if (_ethersToRaise < _refundThreshold) revert InvalidParam();
@@ -62,17 +70,21 @@ contract PublicSaleOverflow is Ownable, ReentrancyGuard {
         ethersToRaise = _ethersToRaise;
         refundThreshold = _refundThreshold;
         burnAddress = _burnAddress;
+        _merkleRootAllowlist = _root;
     }
 
     function setTime(
         uint256 _startTime,
+        uint256 _refundStartTime,
         uint256 _claimStartTime
     ) external onlyOwner {
-        if (_startTime <= block.timestamp) revert InvalidParam();
-        if (_claimStartTime <= _startTime) revert InvalidParam();
+        if (_startTime < block.timestamp) revert InvalidParam();
+        if (_refundStartTime <= _startTime) revert InvalidParam();
+        if (_claimStartTime <= _refundStartTime) revert InvalidParam();
         if (started == true) revert AlreadyStarted();
 
         startTime = _startTime;
+        refundStartTime = _refundStartTime;
         claimStartTime = _claimStartTime;
     }
 
@@ -83,11 +95,21 @@ contract PublicSaleOverflow is Ownable, ReentrancyGuard {
         salesToken.safeTransferFrom(msg.sender, address(this), tokensToSell);
     }
 
-    function commit() external payable nonReentrant {
+    function commit(
+        bytes32[] calldata _merkleProof
+    ) external payable nonReentrant {
+        bytes32 leaf = keccak256(abi.encodePacked(_msgSender()));
+        if (
+            !MerkleProof.verifyCalldata(
+                _merkleProof,
+                _merkleRootAllowlist,
+                leaf
+            )
+        ) revert NotAllowed();
         if (
             !started ||
             block.timestamp <= startTime ||
-            block.timestamp >= claimStartTime
+            block.timestamp >= refundStartTime
         ) revert NotStartedOrAlreadyEnded();
 
         if (
@@ -104,6 +126,7 @@ contract PublicSaleOverflow is Ownable, ReentrancyGuard {
         address account
     ) internal view returns (uint256, uint256) {
         if (commitments[account] == 0) return (0, 0);
+
         if (totalCommitments >= refundThreshold) {
             uint256 ethersToSpend = Math.min(
                 commitments[account],
@@ -126,42 +149,55 @@ contract PublicSaleOverflow is Ownable, ReentrancyGuard {
         return (ethersToRefund, tokensToReceive);
     }
 
-    function claim() external nonReentrant returns (uint256, uint256) {
-        if (block.timestamp <= claimStartTime)
-            revert NotStartedOrAlreadyEnded();
+    function claim() external nonReentrant returns (uint256) {
+        if (block.timestamp < claimStartTime) revert NotStartedOrAlreadyEnded();
 
         if (commitments[msg.sender] == 0) revert InsufficientCommitment();
 
         if (userClaimed[msg.sender] == true) revert HasClaimed();
-
         userClaimed[msg.sender] = true;
-        (uint256 ethersToRefund, uint256 tokensToReceive) = _simulateClaim(
-            msg.sender
-        );
+
         if (totalCommitments >= refundThreshold) {
+            (, uint tokensToReceive) = _simulateClaim(msg.sender);
+
             salesToken.safeTransfer(msg.sender, tokensToReceive);
 
             emit ClaimTokens(msg.sender, tokensToReceive);
 
-            if (ethersToRefund > 0) {
-                (bool success, ) = msg.sender.call{value: ethersToRefund}("");
-                require(success, "Failed to transfer ether");
-            }
-
-            emit ClaimETH(msg.sender, ethersToRefund);
-            return (ethersToRefund, tokensToReceive);
+            return (tokensToReceive);
         } else {
             uint256 amt = commitments[msg.sender];
             commitments[msg.sender] = 0;
+            userRefunded[msg.sender] = true;
             (bool success, ) = msg.sender.call{value: amt}("");
             require(success, "Failed to transfer ether");
             emit ClaimETH(msg.sender, amt);
-            return (amt, 0);
+            return (amt);
         }
     }
 
-    function finish() external onlyOwner returns (uint, uint) {
-        if (block.timestamp <= claimStartTime) revert NotFinished();
+    function overflowRefund() external nonReentrant returns (uint256) {
+        if (block.timestamp <= refundStartTime)
+            revert NotStartedOrAlreadyEnded();
+        if (userRefunded[msg.sender] == true) revert HasRefunded();
+        if (commitments[msg.sender] == 0) revert InsufficientCommitment();
+        if (totalCommitments <= ethersToRaise) revert NotOverflow();
+
+        userRefunded[msg.sender] = true;
+
+        (uint256 ethToRefund, ) = _simulateClaim(msg.sender);
+
+        if (ethToRefund > 0) {
+            (bool success, ) = msg.sender.call{value: ethToRefund}("");
+            require(success, "Failed to transfer ether");
+            emit ClaimETH(msg.sender, ethToRefund);
+            return (ethToRefund);
+        }
+        return (0);
+    }
+
+    function finish() external onlyOwner returns (uint256, uint256) {
+        if (block.timestamp <= refundStartTime) revert NotFinished();
 
         if (finished) revert AlreadyFinished();
 
