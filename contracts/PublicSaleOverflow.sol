@@ -77,6 +77,8 @@ contract PublicSaleOverflow is Ownable, ReentrancyGuard {
 
     function start() external onlyOwner {
         if (started) revert AlreadyStarted();
+        if (startTime == 0) revert InvalidParam();
+        if (claimStartTime == 0) revert InvalidParam();
         started = true;
 
         salesToken.safeTransferFrom(msg.sender, address(this), tokensToSell);
